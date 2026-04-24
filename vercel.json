@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "arxon-command-center",
+  "builds": [
+    { "src": "arxon-command-center.html", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "/arxon-command-center.html" }
+  ]
+}
