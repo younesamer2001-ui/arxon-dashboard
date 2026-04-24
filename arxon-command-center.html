@@ -441,6 +441,10 @@ tailwind.config = {
       <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M7 15h10m4 0a1 1 0 11-2 0 1 1 0 012 0zM6 20h12a1 1 0 001-1V6a1 1 0 00-1-1H6a1 1 0 00-1 1v13a1 1 0 001 1z"/></svg>
       <span class="nav-label">Fakturering</span>
     </button>
+    <button data-tab="tenants" class="sidebar-nav-item tab-btn" data-role="admin">
+      <svg class="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.5v15m7.5-7.5h-15"/><circle cx="12" cy="12" r="9" stroke-width="1.5"/></svg>
+      <span class="nav-label">Tenants</span>
+    </button>
   </nav>
 
   <!-- Footer: Theme + Settings + User -->
@@ -1372,6 +1376,21 @@ tailwind.config = {
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- ═══ TENANTS (admin only) ═══ -->
+  <section class="section hidden" id="sec-tenants">
+    <div class="section-header flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h1 class="section-title">Tenants</h1>
+        <p class="section-subtitle">Kunder med egne dashboard-portaler · admin only</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="openCreateTenant()" class="action-btn" style="background:rgb(139 92 246);color:white;padding:8px 14px;border-radius:8px;font-weight:500;">+ Ny tenant</button>
+        <button onclick="loadTenants(true)" class="action-btn" title="Oppdater">&#8635;</button>
+      </div>
+    </div>
+    <div id="tenantsList" class="space-y-3"></div>
   </section>
 
   <!-- ═══ INNSTILLINGER ═══ -->
@@ -3633,7 +3652,30 @@ function switchTab(tab) {
   }
   if (tab === 'kontakt') { loadKontakt(); }
   if (tab === 'karriere') { loadKarriere(); }
+  if (tab === 'tenants') { loadTenants(); }
 }
+
+// ── Rollebasert UI: skjul admin-only tabs hvis ikke admin ──────────────
+function applyRoleBasedUI(){
+  var profile = window.__authProfile;
+  var isAdmin = profile && profile.role === 'admin';
+  var adminOnlyTabs = ['tenants','prospect'];  // kun admin ser disse
+  var arxonAdminOnlyTabs = ['leads','customers','analytics'];  // Arxons egen CRM, kun for admin
+  var hide = isAdmin ? [] : adminOnlyTabs.concat(arxonAdminOnlyTabs);
+  document.querySelectorAll('.tab-btn[data-tab]').forEach(function(btn){
+    var t = btn.dataset.tab;
+    if (hide.indexOf(t) >= 0) btn.style.display = 'none';
+    else if (btn.dataset.role === 'admin' && !isAdmin) btn.style.display = 'none';
+    else if (!btn.dataset.hidden) btn.style.display = '';
+  });
+}
+// Kjør etter auth-login
+setInterval(function(){
+  if (window.__authProfile && !window.__roleUIApplied){
+    window.__roleUIApplied = true;
+    applyRoleBasedUI();
+  }
+}, 500);
 
 document.getElementById('navTabs').addEventListener('click', e => {
   const btn = e.target.closest('.tab-btn');
@@ -9875,6 +9917,143 @@ function checkPushNew(table, rows){
     if (document.visibilityState === 'visible') { loadKontakt(true); loadKarriere(true); }
   });
 })();
+
+// ═══════════════════════════════════════════════════════════════════════
+// Tenants (Fase 3) — admin-only multi-tenant management
+// ═══════════════════════════════════════════════════════════════════════
+async function loadTenants(silent){
+  try {
+    var r = await q('tenants', 'order=created_at.desc');
+    data.tenants = Array.isArray(r) ? r : [];
+    // Hent antall brukere per tenant
+    var profiles = await q('user_profiles', 'select=tenant_id');
+    var counts = {};
+    (profiles||[]).forEach(function(p){ counts[p.tenant_id] = (counts[p.tenant_id]||0)+1; });
+    data.tenants.forEach(function(t){ t._userCount = counts[t.id] || 0; });
+    renderTenants();
+  } catch(e){ console.error('[loadTenants]', e); }
+}
+
+function renderTenants(){
+  var el = document.getElementById('tenantsList');
+  if (!el) return;
+  var rows = data.tenants || [];
+  if (!rows.length){ el.innerHTML = '<div class="text-center py-10 text-sm text-muted">Ingen tenants enn\u00e5. Klikk "+ Ny tenant" for \u00e5 opprette.</div>'; return; }
+  el.innerHTML = rows.map(function(t){
+    var isArxon = t.is_arxon;
+    return '<div class="rounded-xl border border-border bg-card p-4">'+
+      '<div class="flex items-start justify-between gap-3">'+
+        '<div class="min-w-0 flex-1">'+
+          '<div class="flex items-center gap-2 mb-1">'+
+            '<div class="font-semibold text-zinc-100">'+escH(t.name)+'</div>'+
+            (isArxon ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-400">ARXON</span>' : '')+
+            '<span class="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">'+escH(t.plan||'trial')+'</span>'+
+          '</div>'+
+          '<div class="text-xs text-zinc-500">slug: <code class="text-zinc-400">'+escH(t.slug)+'</code> \u00b7 '+t._userCount+' bruker'+(t._userCount===1?'':'e')+' \u00b7 opprettet '+fmtDT(t.created_at)+'</div>'+
+        '</div>'+
+        '<div class="flex items-center gap-2 shrink-0">'+
+          (!isArxon ? '<button onclick="openInviteUser(\''+escH(t.id)+'\',\''+escH(t.name).replace(/\'/g,"&#39;")+'\')" class="action-btn" style="padding:6px 12px;border-radius:6px;font-size:12px;">Inviter bruker</button>' : '')+
+          (!isArxon ? '<button onclick="deleteTenant(\''+escH(t.id)+'\',\''+escH(t.name).replace(/\'/g,"&#39;")+'\')" class="icon-btn danger" title="Slett tenant">'+
+            '<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.8 12.3a2 2 0 01-2 1.7H7.8a2 2 0 01-2-1.7L5 7M10 11v6M14 11v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"/></svg>'+
+          '</button>' : '')+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+}
+
+function openCreateTenant(){
+  var modal = document.createElement('div');
+  modal.id = 'createTenantModal'; modal.className = 'detail-overlay active';
+  modal.onclick = function(e){ if (e.target === modal) modal.remove(); };
+  modal.innerHTML = '<div class="detail-panel" style="max-width:480px;"><div class="detail-header"><h2 class="detail-title">Opprett ny tenant</h2>'+
+    '<button onclick="document.getElementById(\'createTenantModal\').remove()" class="icon-btn">'+
+    '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg></button></div>'+
+    '<div class="detail-body">'+
+      '<div class="detail-section"><div class="detail-label">Firmanavn *</div><input id="newTenantName" class="detail-textarea" style="min-height:auto;padding:10px 14px;" placeholder="F.eks. Holmlia Bilverksted AS" oninput="document.getElementById(\'newTenantSlug\').value = this.value.toLowerCase().replace(/\\s+/g,\'-\').replace(/[\u00e6\u00f8\u00e5]/g, function(c){ return {\'\u00e6\':\'ae\',\'\u00f8\':\'o\',\'\u00e5\':\'a\'}[c]; }).replace(/[^a-z0-9-]/g,\'\')"></div>'+
+      '<div class="detail-section"><div class="detail-label">Slug (URL-vennlig)</div><input id="newTenantSlug" class="detail-textarea" style="min-height:auto;padding:10px 14px;" placeholder="holmlia-bilverksted"></div>'+
+      '<div class="detail-section"><div class="detail-label">Plan</div><select id="newTenantPlan" class="detail-textarea" style="min-height:auto;padding:10px 14px;"><option value="trial">Trial</option><option value="starter">Starter</option><option value="pro" selected>Pro</option><option value="enterprise">Enterprise</option></select></div>'+
+      '<div class="detail-actions"><button onclick="createTenant()" class="detail-btn primary">Opprett</button><button onclick="document.getElementById(\'createTenantModal\').remove()" class="detail-btn">Avbryt</button></div>'+
+    '</div></div>';
+  document.body.appendChild(modal);
+  setTimeout(function(){ document.getElementById('newTenantName').focus(); }, 50);
+}
+
+async function createTenant(){
+  var name = document.getElementById('newTenantName').value.trim();
+  var slug = document.getElementById('newTenantSlug').value.trim();
+  var plan = document.getElementById('newTenantPlan').value;
+  if (!name || !slug){ toast('Navn og slug er p\u00e5krevd', 'error'); return; }
+  try {
+    var r = await fetch(SB+'/tenants', {
+      method:'POST', headers:{...H, 'Prefer':'return=representation'},
+      body: JSON.stringify({name: name, slug: slug, plan: plan, is_arxon: false})
+    });
+    if (!r.ok){ var j = await r.json().catch(()=>({})); throw new Error(j.message || r.status); }
+    toast('Tenant "'+name+'" opprettet');
+    var m = document.getElementById('createTenantModal'); if (m) m.remove();
+    loadTenants();
+  } catch(e){ toast('Kunne ikke opprette: '+e.message, 'error'); }
+}
+
+async function deleteTenant(id, name){
+  if (!confirm('Slette tenant "'+name+'"? Alle brukerprofiler knyttet blir ogs\u00e5 l\u00f8snet. Dette kan ikke angres.')) return;
+  try {
+    var r = await fetch(SB+'/tenants?id=eq.'+id, {method:'DELETE', headers: H});
+    if (!r.ok) throw new Error(r.status);
+    toast('Tenant slettet');
+    loadTenants();
+  } catch(e){ toast('Slett feilet: '+e.message, 'error'); }
+}
+
+function openInviteUser(tenantId, tenantName){
+  var modal = document.createElement('div');
+  modal.id = 'inviteUserModal'; modal.className = 'detail-overlay active';
+  modal.onclick = function(e){ if (e.target === modal) modal.remove(); };
+  modal.innerHTML = '<div class="detail-panel" style="max-width:480px;"><div class="detail-header"><h2 class="detail-title">Inviter bruker til '+escH(tenantName)+'</h2>'+
+    '<button onclick="document.getElementById(\'inviteUserModal\').remove()" class="icon-btn"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg></button></div>'+
+    '<div class="detail-body">'+
+      '<div class="detail-section"><p class="text-sm text-zinc-400">Skriv inn brukerens Google-e-post. De m\u00e5 logge inn med Google p\u00e5 dashboardet \u00e9n gang, s\u00e5 kobles kontoen automatisk til denne tenanten.</p></div>'+
+      '<div class="detail-section"><div class="detail-label">E-post *</div><input id="inviteEmail" type="email" class="detail-textarea" style="min-height:auto;padding:10px 14px;" placeholder="bruker@kunde.no"></div>'+
+      '<div class="detail-section"><div class="detail-label">Rolle</div><select id="inviteRole" class="detail-textarea" style="min-height:auto;padding:10px 14px;"><option value="member" selected>Member (kan endre egne data)</option><option value="viewer">Viewer (kun lese)</option><option value="admin">Admin (full tilgang)</option></select></div>'+
+      '<div class="detail-actions"><button onclick="inviteUser(\''+tenantId+'\')" class="detail-btn primary">Inviter</button><button onclick="document.getElementById(\'inviteUserModal\').remove()" class="detail-btn">Avbryt</button></div>'+
+    '</div></div>';
+  document.body.appendChild(modal);
+  setTimeout(function(){ document.getElementById('inviteEmail').focus(); }, 50);
+}
+
+async function inviteUser(tenantId){
+  var email = document.getElementById('inviteEmail').value.trim().toLowerCase();
+  var role = document.getElementById('inviteRole').value;
+  if (!email){ toast('E-post er p\u00e5krevd', 'error'); return; }
+  try {
+    // Sjekk om auth-user eksisterer (via et pre-laget RPC som returnerer user_id fra email)
+    var r = await fetch(SB+'/rpc/find_auth_user_by_email', {
+      method:'POST', headers: H,
+      body: JSON.stringify({p_email: email})
+    });
+    var userId = await r.json().catch(()=>null);
+    if (!userId){
+      // Brukeren har ikke logget inn enn\u00e5 \u2014 vi lagrer i pending_invites
+      var r2 = await fetch(SB+'/pending_invites', {
+        method:'POST', headers:{...H, 'Prefer':'return=minimal'},
+        body: JSON.stringify({email: email, tenant_id: tenantId, role: role})
+      });
+      if (!r2.ok) throw new Error('pending_invites feilet');
+      toast('Invitasjon lagret. Be '+email+' logge inn med Google p\u00e5 dashboard.arxon.no \u2014 profil opprettes automatisk.');
+    } else {
+      // Opprett profil direkte
+      var r3 = await fetch(SB+'/user_profiles', {
+        method:'POST', headers:{...H, 'Prefer':'resolution=merge-duplicates,return=minimal'},
+        body: JSON.stringify({id: userId, tenant_id: tenantId, role: role})
+      });
+      if (!r3.ok) throw new Error('user_profiles insert feilet');
+      toast(email+' lagt til som '+role);
+    }
+    var m = document.getElementById('inviteUserModal'); if (m) m.remove();
+    loadTenants();
+  } catch(e){ toast('Invitasjon feilet: '+e.message, 'error'); }
+}
 </script>
 
 <div id="jarvisPanel" class="j-panel-hidden">
