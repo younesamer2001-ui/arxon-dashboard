@@ -1246,11 +1246,21 @@ tailwind.config = {
       </div>
     </div>
 
+    <!-- Vapi calls summary (skjules hvis 0 samtaler) -->
+    <div class="rounded-xl border border-border bg-card overflow-hidden mb-6">
+      <div class="p-6">
+        <h3 class="text-sm font-semibold text-zinc-200 mb-3">Vapi-samtaler</h3>
+        <div id="analytics-calls-summary">
+          <div class="text-zinc-500 text-sm text-center py-4">Ingen samtaler enda. Når Vapi-agentene mottar samtaler vil tallene vises her.</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Visitor-to-Lead Funnel -->
     <div class="rounded-xl border border-border bg-card overflow-hidden mb-6">
       <div class="p-6">
         <h3 class="text-sm font-semibold text-zinc-200 mb-1">Konverteringstrakt</h3>
-        <p class="text-[11px] text-zinc-500 mb-5">Besøk → Kontaktskjema → Lead → Kunde</p>
+        <p class="text-[11px] text-zinc-500 mb-5">Kontaktskjema og Leads er separate kilder · «% av forrige» vises kun hvor stegene er sekvensielle</p>
         <div id="conversionFunnel" class="space-y-2">
           <div class="skeleton h-32"></div>
         </div>
@@ -8740,19 +8750,32 @@ function clearEpostForm() {
 // ===== ANALYSE =====
 async function loadAnalyticsData() {
   try {
-    const [leads, customers, contacts, revenue] = await Promise.all([
+    const [leads, customers, contacts, revenue, calls] = await Promise.all([
       q('leads','select=*&limit=1000'),
       q('customers','select=*&limit=1000'),
       q('contact_submissions','select=*&order=created_at.desc&limit=500'),
-      q('revenue_entries','select=amount_usd,period_start,status&order=period_start.asc&limit=200')
+      q('revenue_entries','select=amount_usd,period_start,status&order=period_start.asc&limit=200'),
+      q('calls','select=id,outcome,duration_seconds,niche,created_at&limit=500').catch(()=>[])
     ]);
 
     const totalLeads = leads.length;
     const totalCustomers = customers.length;
     const totalContacts = contacts.length;
+    const totalCalls = (calls||[]).length;
     const conversionRate = totalLeads > 0 ? ((totalCustomers / totalLeads) * 100).toFixed(1) : 0;
     const monthlyRevenue = customers.reduce((sum, c) => sum + (c.monthly_price || 0), 0);
     const avgDeal = totalCustomers > 0 ? Math.round(monthlyRevenue / totalCustomers) : 0;
+
+    // Helper: forsiktig prosentvis endring (cap, fallback for sparse data)
+    const fmtPctChange = (cur, prev) => {
+      if (prev === 0 && cur === 0) return { html: '<span class="text-zinc-600">ingen data</span>' };
+      if (prev === 0) return { html: '<span class="text-emerald-400">+'+cur+'</span> <span class="text-zinc-600">nye (forrige mnd: 0)</span>' };
+      const pct = Math.round(((cur - prev) / prev) * 100);
+      const capped = Math.max(-999, Math.min(999, pct));
+      const cls = capped >= 0 ? 'text-emerald-400' : 'text-red-400';
+      const sign = capped >= 0 ? '+' : '';
+      return { html: '<span class="'+cls+'">'+sign+capped+'%</span> <span class="text-zinc-600">vs forrige mnd</span>' };
+    };
 
     // Leads this month vs last month
     const now = new Date();
@@ -8763,21 +8786,14 @@ async function loadAnalyticsData() {
     const leadsLastMonth = leads.filter(l => l.created_at && l.created_at.startsWith(lastMonth)).length;
 
     document.getElementById('analytics-total-leads').textContent = totalLeads;
-    const leadsTrendEl = document.getElementById('analytics-leads-trend');
-    if (leadsLastMonth > 0) {
-      const pctChange = Math.round(((leadsThisMonth - leadsLastMonth) / leadsLastMonth) * 100);
-      leadsTrendEl.innerHTML = '<span class="' + (pctChange >= 0 ? 'text-emerald-400' : 'text-red-400') + '">' + (pctChange >= 0 ? '+' : '') + pctChange + '%</span> <span class="text-zinc-600">vs forrige mnd</span>';
-    } else {
-      leadsTrendEl.innerHTML = '<span class="text-zinc-600">' + leadsThisMonth + ' denne mnd</span>';
-    }
+    document.getElementById('analytics-leads-trend').innerHTML = fmtPctChange(leadsThisMonth, leadsLastMonth).html;
 
     document.getElementById('analytics-conversion-rate').textContent = conversionRate + '%';
     document.getElementById('analytics-avg-deal').textContent = avgDeal > 0 ? 'kr ' + avgDeal.toLocaleString('nb-NO') : '-';
     document.getElementById('analytics-monthly-revenue').textContent = 'kr ' + monthlyRevenue.toLocaleString('nb-NO');
 
     // MRR trend
-    const mrrTrendEl = document.getElementById('analytics-mrr-trend');
-    mrrTrendEl.innerHTML = '<span class="text-emerald-400">' + totalCustomers + '</span> <span class="text-zinc-600">aktive kunder</span>';
+    document.getElementById('analytics-mrr-trend').innerHTML = '<span class="text-emerald-400">' + totalCustomers + '</span> <span class="text-zinc-600">aktive kunde'+(totalCustomers===1?'':'r')+'</span>';
 
     // Contact submission KPIs
     document.getElementById('analytics-total-contacts').textContent = totalContacts;
@@ -8791,27 +8807,43 @@ async function loadAnalyticsData() {
     const leadEmails = new Set(leads.map(l => (l.contact_email||'').toLowerCase()).filter(Boolean));
     let contactToLead = 0;
     contactEmails.forEach(e => { if (leadEmails.has(e)) contactToLead++; });
-    const contactToLeadRate = totalContacts > 0 ? ((contactToLead / totalContacts) * 100).toFixed(0) : 0;
+    const contactToLeadRate = totalContacts > 0 ? Math.min(100, ((contactToLead / totalContacts) * 100)).toFixed(0) : 0;
     document.getElementById('analytics-contact-to-lead').textContent = contactToLeadRate + '%';
 
-    // Avg response time placeholder
-    document.getElementById('analytics-avg-response').textContent = totalContacts > 0 ? '< 24t' : '-';
+    // Avg response time: faktisk beregning fra contact_submissions med status != 'new'
+    const respondedContacts = contacts.filter(c => c.status && c.status !== 'new' && c.updated_at && c.created_at && c.updated_at !== c.created_at);
+    if (respondedContacts.length > 0){
+      const totalMs = respondedContacts.reduce((sum, c) => sum + (new Date(c.updated_at) - new Date(c.created_at)), 0);
+      const avgHrs = totalMs / respondedContacts.length / 3600000;
+      let label;
+      if (avgHrs < 1) label = Math.round(avgHrs*60) + ' min';
+      else if (avgHrs < 24) label = avgHrs.toFixed(1).replace('.0','') + ' t';
+      else label = (avgHrs/24).toFixed(1).replace('.0','') + ' d';
+      document.getElementById('analytics-avg-response').textContent = label;
+    } else {
+      document.getElementById('analytics-avg-response').textContent = '–';
+    }
 
     // ── Conversion Funnel ──
+    // Smart drop-off: vis kun "% videre" der det gir mening (sekvensielle steg fra samme datakilde).
+    // Kontaktskjema → Leads er IKKE 1:1 (leads kan komme fra mange kilder), så vi viser bare absolutte tall der.
+    const tilbudSendt = leads.filter(l => ['proposal','negotiation','won'].includes(l.stage)).length;
     const funnelSteps = [
-      { label: 'Kontaktskjema', count: totalContacts, color: 'from-purple-500 to-purple-700', icon: '✉️' },
-      { label: 'Kvalifiserte leads', count: totalLeads, color: 'from-blue-500 to-blue-700', icon: '👤' },
-      { label: 'Tilbud sendt', count: leads.filter(l => ['proposal','negotiation'].includes(l.stage)).length, color: 'from-amber-500 to-amber-700', icon: '📄' },
-      { label: 'Kunder', count: totalCustomers, color: 'from-emerald-500 to-emerald-700', icon: '✅' }
+      { label: 'Kontaktskjema', count: totalContacts, color: 'from-purple-500 to-purple-700', icon: '✉️', dropFrom: null },
+      { label: 'Kvalifiserte leads', count: totalLeads, color: 'from-blue-500 to-blue-700', icon: '👤', dropFrom: null /* ikke 1:1 */ },
+      { label: 'Tilbud sendt', count: tilbudSendt, color: 'from-amber-500 to-amber-700', icon: '📄', dropFrom: totalLeads },
+      { label: 'Kunder', count: totalCustomers, color: 'from-emerald-500 to-emerald-700', icon: '✅', dropFrom: tilbudSendt }
     ];
     const funnelMax = Math.max(...funnelSteps.map(s => s.count), 1);
     const funnelHTML = funnelSteps.map((step, i) => {
       const w = Math.max(20, (step.count / funnelMax) * 100);
-      const dropoff = i > 0 && funnelSteps[i-1].count > 0
-        ? ' → ' + ((step.count / funnelSteps[i-1].count) * 100).toFixed(0) + '% videre'
-        : '';
+      let dropoff = '';
+      if (step.dropFrom != null && step.dropFrom > 0){
+        const pct = Math.min(100, (step.count / step.dropFrom) * 100);
+        dropoff = ' → ' + pct.toFixed(0) + '% av forrige';
+      }
       return '<div class="flex items-center gap-3">' +
-        '<div class="w-24 text-right shrink-0"><span class="text-[11px] text-zinc-400">' + step.icon + ' ' + step.label + '</span></div>' +
+        '<div class="w-32 text-right shrink-0"><span class="text-[11px] text-zinc-400">' + step.icon + ' ' + step.label + '</span></div>' +
         '<div class="flex-1"><div class="relative bg-zinc-900 rounded-lg h-9 overflow-hidden">' +
           '<div class="absolute inset-y-0 left-0 bg-gradient-to-r ' + step.color + ' rounded-lg transition-all duration-700" style="width:' + w + '%"></div>' +
           '<div class="absolute inset-0 flex items-center px-3"><span class="text-sm font-bold text-white drop-shadow">' + step.count + '</span>' +
@@ -8821,6 +8853,22 @@ async function loadAnalyticsData() {
       '</div>';
     }).join('');
     document.getElementById('conversionFunnel').innerHTML = funnelHTML;
+
+    // ── Calls KPI bar (legg til over Pipeline-trakt hvis det finnes calls) ──
+    if (totalCalls > 0){
+      const callsCard = document.getElementById('analytics-calls-summary');
+      if (callsCard){
+        const totalDur = calls.reduce((s,c)=>s+(c.duration_seconds||0),0);
+        const avgDurMin = totalCalls ? Math.round(totalDur/totalCalls/60) : 0;
+        const completedRate = calls.length ? Math.round(calls.filter(c=>['completed','booked'].includes(c.outcome)).length/calls.length*100) : 0;
+        callsCard.innerHTML =
+          '<div class="grid grid-cols-3 gap-4 text-center">'+
+            '<div><div class="text-2xl font-bold text-violet-400">'+totalCalls+'</div><div class="text-[10px] text-zinc-500 mt-1">Totale samtaler</div></div>'+
+            '<div><div class="text-2xl font-bold text-zinc-200">'+avgDurMin+' min</div><div class="text-[10px] text-zinc-500 mt-1">Snitt varighet</div></div>'+
+            '<div><div class="text-2xl font-bold text-emerald-400">'+completedRate+'%</div><div class="text-[10px] text-zinc-500 mt-1">Fullført rate</div></div>'+
+          '</div>';
+      }
+    }
 
     // ── Pipeline Funnel ──
     const stageOrder = ['new','contacted','meeting','qualified','proposal','negotiation','won','lost'];
