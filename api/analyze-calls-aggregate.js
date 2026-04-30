@@ -70,7 +70,7 @@ async function fetchRecentCalls(authHeader, days, maxCalls, tenantId) {
   return res.json();
 }
 
-function transcriptToText(transcript, maxLen = 1500) {
+function transcriptToText(transcript, maxLen = 600) {
   let text;
   if (Array.isArray(transcript)) {
     text = transcript
@@ -99,7 +99,7 @@ Sentiment: ${call.sentiment ?? '?'}
 Sammendrag: ${call.summary || '(mangler)'}
 
 Transkript (trunkert):
-${transcriptToText(call.transcript, 1200)}
+${transcriptToText(call.transcript, 600)}
 `;
 }
 
@@ -212,7 +212,8 @@ export default async function handler(req, res) {
     }));
 
     const days = Math.max(1, Math.min(90, body?.days || 7));
-    const maxCalls = Math.max(1, Math.min(50, body?.maxCalls || 30));
+    // Cap til 15 for å holde oss under Vercel 30s timeout
+    const maxCalls = Math.max(1, Math.min(15, body?.maxCalls || 15));
     const tenantId = body?.tenantId || null;
 
     const calls = await fetchRecentCalls(authHeader, days, maxCalls, tenantId);

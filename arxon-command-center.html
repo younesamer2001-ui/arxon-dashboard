@@ -979,7 +979,7 @@ tailwind.config = {
       <div id="trendAnalysisContent">
         <div class="text-center py-10 text-sm text-muted">
           Velg periode og klikk "Kjør analyse" for å finne mønstre på tvers av samtaler.<br>
-          <span class="text-[11px] text-zinc-600 mt-2 inline-block">AI-en leser opptil 30 samtaler og gir deg konkrete forbedringspunkter.</span>
+          <span class="text-[11px] text-zinc-600 mt-2 inline-block">AI-en leser opptil 15 samtaler og gir deg konkrete forbedringspunkter.</span>
         </div>
       </div>
     </div>
@@ -5804,7 +5804,7 @@ async function runTrendAnalysis() {
 
   btn.disabled = true;
   btn.innerHTML = '<span class="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span><span>Analyserer...</span>';
-  content.innerHTML = '<div class="flex items-center gap-2 py-8 text-sm text-muted"><div class="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"></div>AI leser opptil 30 samtaler og finner mønstre... (15-40 sek)</div>';
+  content.innerHTML = '<div class="flex items-center gap-2 py-8 text-sm text-muted"><div class="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"></div>AI leser opptil 15 samtaler og finner mønstre... (15-40 sek)</div>';
 
   try {
     const session = window.__authSession;
@@ -5816,7 +5816,7 @@ async function runTrendAnalysis() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ days, maxCalls: 30 }),
+      body: JSON.stringify({ days, maxCalls: 15 }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
