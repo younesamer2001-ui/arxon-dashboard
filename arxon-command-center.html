@@ -8,6 +8,9 @@
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-W62TER737K"></script>
 <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-W62TER737K');</script>
 <script src="https://cdn.tailwindcss.com"></script>
+<!-- PDF-eksport (jsPDF + html2canvas via CDN, ingen build) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script>
   // Supabase client loaded lazily — only when auth is required.
   // Regular (non-module) script so window.loadSupabaseClient is defined
@@ -857,6 +860,9 @@ tailwind.config = {
           <p class="section-subtitle">AI-telefonsamtaler: resultater, transkript og oppfølging</p>
         </div>
         <div class="flex items-center gap-2">
+          <button onclick="openTrendAnalysis()" class="text-xs px-3 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border border-violet-500/30 transition-colors flex items-center gap-1.5" title="AI-analyse på tvers av samtaler">
+            <span>🤖</span><span>AI-trender</span>
+          </button>
           <button onclick="refreshSamtaler()" class="action-btn" title="Last inn på nytt">↻</button>
         </div>
       </div>
@@ -917,15 +923,65 @@ tailwind.config = {
   <!-- Samtale detail modal -->
   <div id="samtaleModal" class="fixed inset-0 z-[110] hidden items-center justify-center">
     <div class="absolute inset-0 bg-black/60" onclick="closeSamtaleDetail()"></div>
-    <div class="relative bg-card border border-border rounded-2xl w-full max-w-2xl mx-4 p-6 fade-in max-h-[90vh] overflow-y-auto">
+    <div class="relative bg-card border border-border rounded-2xl w-full max-w-3xl mx-4 p-6 fade-in max-h-[90vh] overflow-y-auto" id="samtaleModalCard">
       <div class="flex items-start justify-between mb-4">
         <div>
           <h2 class="text-lg font-semibold text-zinc-100" id="samtaleModalTitle">Samtale</h2>
           <p class="text-xs text-muted mt-0.5" id="samtaleModalMeta"></p>
         </div>
-        <button onclick="closeSamtaleDetail()" class="text-zinc-500 hover:text-zinc-200 text-xl leading-none">×</button>
+        <div class="flex items-center gap-2">
+          <button onclick="analyzeCurrentCall()" id="samtaleAnalyzeBtn" class="text-xs px-3 py-1.5 rounded-lg bg-violet-500/15 hover:bg-violet-500/25 text-violet-300 border border-violet-500/30 transition-colors flex items-center gap-1.5" title="Kjør AI-analyse">
+            <span>🤖</span><span>AI-analyse</span>
+          </button>
+          <button onclick="exportCurrentCallPdf()" id="samtalePdfBtn" class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-border transition-colors flex items-center gap-1.5" title="Eksporter til PDF">
+            <span>📄</span><span>PDF</span>
+          </button>
+          <button onclick="closeSamtaleDetail()" class="text-zinc-500 hover:text-zinc-200 text-xl leading-none ml-1">×</button>
+        </div>
       </div>
       <div id="samtaleModalBody"></div>
+      <!-- AI-analyse-seksjon (skjult til knappen klikkes) -->
+      <div id="samtaleAnalysisSection" class="hidden mt-5 pt-5 border-t border-border">
+        <div id="samtaleAnalysisContent"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Aggregert AI-trend-analyse modal -->
+  <div id="trendAnalysisModal" class="fixed inset-0 z-[110] hidden items-center justify-center">
+    <div class="absolute inset-0 bg-black/60" onclick="closeTrendAnalysis()"></div>
+    <div class="relative bg-card border border-border rounded-2xl w-full max-w-3xl mx-4 p-6 fade-in max-h-[90vh] overflow-y-auto" id="trendAnalysisCard">
+      <div class="flex items-start justify-between mb-4">
+        <div>
+          <h2 class="text-lg font-semibold text-zinc-100">AI-trender på tvers av samtaler</h2>
+          <p class="text-xs text-muted mt-0.5" id="trendAnalysisMeta">Analyserer mønstre i samtaler for å vise hva som funker og hva som ikke gjør det</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="exportTrendAnalysisPdf()" id="trendPdfBtn" class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-border transition-colors flex items-center gap-1.5 hidden" title="Eksporter til PDF">
+            <span>📄</span><span>PDF</span>
+          </button>
+          <button onclick="closeTrendAnalysis()" class="text-zinc-500 hover:text-zinc-200 text-xl leading-none ml-1">×</button>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 mb-4 pb-4 border-b border-border">
+        <label class="text-[11px] text-muted">Periode:</label>
+        <select id="trendDays" class="text-xs bg-zinc-900 border border-border rounded-md px-2 py-1.5 text-zinc-100">
+          <option value="3">Siste 3 dager</option>
+          <option value="7" selected>Siste 7 dager</option>
+          <option value="14">Siste 14 dager</option>
+          <option value="30">Siste 30 dager</option>
+        </select>
+        <button onclick="runTrendAnalysis()" id="runTrendBtn" class="text-xs px-3 py-1.5 rounded-lg bg-violet-500 hover:bg-violet-600 text-white transition-colors flex items-center gap-1.5">
+          <span>🤖</span><span>Kjør analyse</span>
+        </button>
+        <span class="text-[10px] text-zinc-600 ml-auto">Forventet kostnad: ~0.30 kr</span>
+      </div>
+      <div id="trendAnalysisContent">
+        <div class="text-center py-10 text-sm text-muted">
+          Velg periode og klikk "Kjør analyse" for å finne mønstre på tvers av samtaler.<br>
+          <span class="text-[11px] text-zinc-600 mt-2 inline-block">AI-en leser opptil 30 samtaler og gir deg konkrete forbedringspunkter.</span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -5339,6 +5395,663 @@ function closeSamtaleDetail() {
   if (!m) return;
   m.classList.add('hidden');
   m.classList.remove('flex');
+  // Reset AI-analyse-seksjonen så den ikke flasher gammelt innhold neste gang
+  const sec = document.getElementById('samtaleAnalysisSection');
+  if (sec) {
+    sec.classList.add('hidden');
+    document.getElementById('samtaleAnalysisContent').innerHTML = '';
+  }
+  window.__currentCallId = null;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// AI-ANALYSE + PDF-EKSPORT for samtaler
+// ═════════════════════════════════════════════════════════════════
+
+window.__currentCallId = null;
+
+// Patch openSamtaleDetail så den lagrer current call id og auto-laster eksisterende analyse
+const __origOpenSamtale = openSamtaleDetail;
+openSamtaleDetail = function(id) {
+  window.__currentCallId = id;
+  __origOpenSamtale.call(this, id);
+  // Skjul analyse-seksjonen som default
+  const sec = document.getElementById('samtaleAnalysisSection');
+  if (sec) sec.classList.add('hidden');
+  document.getElementById('samtaleAnalysisContent').innerHTML = '';
+  // Last eksisterende analyse hvis noen finnes
+  fetchExistingCallAnalysis(id);
+};
+
+async function fetchExistingCallAnalysis(callId) {
+  try {
+    const rows = await q('call_analyses', `call_id=eq.${callId}&analysis_type=eq.single_call&order=created_at.desc&limit=1`);
+    if (Array.isArray(rows) && rows.length) {
+      renderCallAnalysis(rows[0], false);
+    }
+  } catch (e) {
+    // Stille feil — analyse er valgfri
+    console.warn('[analysis] Kunne ikke hente eksisterende', e);
+  }
+}
+
+async function analyzeCurrentCall() {
+  const callId = window.__currentCallId;
+  if (!callId) return showToast?.('Ingen samtale valgt');
+
+  const btn = document.getElementById('samtaleAnalyzeBtn');
+  const sec = document.getElementById('samtaleAnalysisSection');
+  const content = document.getElementById('samtaleAnalysisContent');
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="inline-block w-3 h-3 border-2 border-violet-300 border-t-transparent rounded-full animate-spin"></span><span>Analyserer...</span>';
+  }
+  sec.classList.remove('hidden');
+  content.innerHTML = '<div class="flex items-center gap-2 py-6 text-sm text-muted"><div class="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"></div>AI leser samtalen og finner mønstre... (ca 5-15 sek)</div>';
+
+  try {
+    const session = window.__authSession;
+    if (!session?.access_token) throw new Error('Ikke logget inn');
+
+    const res = await fetch('/api/analyze-call', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ callId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+    renderCallAnalysis(data.analysis, true);
+  } catch (e) {
+    console.error('[analyze-call]', e);
+    content.innerHTML = `<div class="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-300">
+      <div class="font-semibold mb-1">Kunne ikke analysere</div>
+      <div>${esc(e.message)}</div>
+      <div class="text-[10px] text-red-400/70 mt-2">Sjekk Vercel-logger eller at OPENAI_API_KEY + SUPABASE_SERVICE_ROLE_KEY er satt på prosjektet.</div>
+    </div>`;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<span>🤖</span><span>Analyser på nytt</span>';
+    }
+  }
+}
+
+function renderCallAnalysis(a, isFresh) {
+  const sec = document.getElementById('samtaleAnalysisSection');
+  const content = document.getElementById('samtaleAnalysisContent');
+  if (!a) return;
+  sec.classList.remove('hidden');
+
+  const score = a.overall_score ?? 0;
+  const scoreColor = score >= 8 ? 'emerald' : score >= 5 ? 'amber' : 'red';
+  const ageMin = Math.round((Date.now() - new Date(a.created_at).getTime()) / 60000);
+  const ageLabel = ageMin < 1 ? 'akkurat nå' : ageMin < 60 ? `${ageMin} min siden` : (ageMin < 1440 ? `${Math.round(ageMin/60)} t siden` : `${Math.round(ageMin/1440)} d siden`);
+
+  const renderBullets = (arr, color) => {
+    if (!Array.isArray(arr) || !arr.length) return '<div class="text-[11px] text-zinc-600 italic">Ingen punkter</div>';
+    return '<ul class="space-y-1.5">' + arr.map(b => `<li class="text-xs text-zinc-300 flex items-start gap-2"><span class="text-${color}-400 mt-0.5">•</span><span>${esc(b)}</span></li>`).join('') + '</ul>';
+  };
+
+  const renderProblems = (arr) => {
+    if (!Array.isArray(arr) || !arr.length) return '<div class="text-[11px] text-zinc-600 italic">Ingen detekterte problemer</div>';
+    return '<div class="flex flex-wrap gap-1.5">' + arr.map(p => {
+      const cat = p.category || 'other';
+      const catColor = { intent_recognition: 'red', language: 'amber', booking: 'sky', escalation: 'violet', tone: 'pink', other: 'zinc' }[cat] || 'zinc';
+      return `<span class="text-[10px] px-2 py-0.5 rounded-full bg-${catColor}-500/15 text-${catColor}-300 border border-${catColor}-500/30" title="${esc(p.description||'')}">${esc(cat)}</span>`;
+    }).join('') + '</div>';
+  };
+
+  content.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-3">
+        <div class="text-[10px] font-semibold text-muted uppercase tracking-wider">AI-analyse</div>
+        <div class="flex items-center gap-1.5">
+          <span class="text-2xl font-bold text-${scoreColor}-400 tabular-nums">${score}</span>
+          <span class="text-xs text-zinc-500">/10</span>
+        </div>
+        ${isFresh ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300">Ny</span>' : ''}
+      </div>
+      <span class="text-[10px] text-zinc-600">${ageLabel} · ${a.model_used || 'gpt-4o-mini'}</span>
+    </div>
+
+    ${a.customer_intent ? `<div class="mb-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="rounded-lg bg-zinc-900/60 border border-border p-3">
+        <div class="text-[10px] font-semibold text-muted uppercase tracking-wider mb-1">Kundens intensjon</div>
+        <div class="text-xs text-zinc-200">${esc(a.customer_intent)}</div>
+      </div>
+      <div class="rounded-lg bg-zinc-900/60 border border-border p-3">
+        <div class="text-[10px] font-semibold text-muted uppercase tracking-wider mb-1">Slik gikk det</div>
+        <div class="text-xs text-zinc-200">${esc(a.outcome_assessment || '—')}</div>
+      </div>
+    </div>` : ''}
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+      <div class="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-3">
+        <div class="text-[10px] font-semibold text-emerald-300 uppercase tracking-wider mb-2 flex items-center gap-1">
+          <span>✓</span><span>Hva funket</span>
+        </div>
+        ${renderBullets(a.what_worked, 'emerald')}
+      </div>
+      <div class="rounded-lg bg-red-500/5 border border-red-500/20 p-3">
+        <div class="text-[10px] font-semibold text-red-300 uppercase tracking-wider mb-2 flex items-center gap-1">
+          <span>✗</span><span>Hva feilet</span>
+        </div>
+        ${renderBullets(a.what_failed, 'red')}
+      </div>
+    </div>
+
+    <div class="rounded-lg bg-violet-500/5 border border-violet-500/20 p-3 mb-3">
+      <div class="text-[10px] font-semibold text-violet-300 uppercase tracking-wider mb-2 flex items-center gap-1">
+        <span>→</span><span>Konkrete forbedringspunkter</span>
+      </div>
+      ${renderBullets(a.suggested_fixes, 'violet')}
+    </div>
+
+    <div class="rounded-lg bg-zinc-900/60 border border-border p-3">
+      <div class="text-[10px] font-semibold text-muted uppercase tracking-wider mb-2">Detekterte problem-kategorier</div>
+      ${renderProblems(a.detected_problems)}
+    </div>
+  `;
+}
+
+// ═════════════════════════════════════════════════════════════════
+// PDF-EKSPORT
+// ═════════════════════════════════════════════════════════════════
+
+async function exportCurrentCallPdf() {
+  const callId = window.__currentCallId;
+  if (!callId) return;
+  const c = (data.calls || []).find(x => x.id === callId);
+  if (!c) return;
+
+  // Prøv å hente analyse hvis vi har en
+  let analysis = null;
+  try {
+    const rows = await q('call_analyses', `call_id=eq.${callId}&analysis_type=eq.single_call&order=created_at.desc&limit=1`);
+    if (Array.isArray(rows) && rows.length) analysis = rows[0];
+  } catch (e) {}
+
+  generateCallPdf(c, analysis);
+}
+
+function generateCallPdf(c, analysis) {
+  if (!window.jspdf) {
+    alert('PDF-bibliotek ikke lastet. Last siden på nytt.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  let y = margin;
+
+  // Hjelpefunksjon for å håndtere page-break
+  const checkPage = (needed) => {
+    if (y + needed > pageH - margin) {
+      doc.addPage();
+      y = margin;
+    }
+  };
+
+  const wrapText = (text, maxWidth, fontSize) => {
+    if (!text) return [];
+    doc.setFontSize(fontSize);
+    return doc.splitTextToSize(String(text), maxWidth);
+  };
+
+  const heading = (text, size = 14, color = [33, 33, 36]) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(size);
+    doc.setTextColor(...color);
+    doc.text(text, margin, y);
+    y += size + 4;
+  };
+
+  const para = (text, size = 10, color = [60, 60, 70]) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(size);
+    doc.setTextColor(...color);
+    const lines = wrapText(text, pageW - 2*margin, size);
+    for (const line of lines) {
+      checkPage(size + 2);
+      doc.text(line, margin, y);
+      y += size + 2;
+    }
+  };
+
+  const muted = (text, size = 9) => para(text, size, [120, 120, 130]);
+
+  const bullets = (arr, color = [60, 60, 70], bulletColor = [120, 120, 200]) => {
+    if (!Array.isArray(arr) || !arr.length) {
+      muted('  Ingen punkter', 9);
+      return;
+    }
+    for (const b of arr) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      const lines = wrapText('  • ' + b, pageW - 2*margin - 10, 10);
+      for (let i = 0; i < lines.length; i++) {
+        checkPage(12);
+        doc.setTextColor(...(i === 0 ? bulletColor : color));
+        doc.text(i === 0 ? lines[i] : '    ' + lines[i].replace(/^\s*•\s*/, ''), margin + 4, y);
+        y += 12;
+      }
+    }
+  };
+
+  const hr = () => {
+    y += 4;
+    doc.setDrawColor(220, 220, 230);
+    doc.line(margin, y, pageW - margin, y);
+    y += 10;
+  };
+
+  // ── Header ──
+  doc.setFillColor(8, 8, 12);
+  doc.rect(0, 0, pageW, 60, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text('ARXON', margin, 36);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(180, 180, 190);
+  doc.text('Samtale-rapport · ' + new Date().toLocaleDateString('no-NO'), margin, 50);
+  y = 80;
+
+  // ── Tittel ──
+  const lead = (data.leads || []).find(l => l.id === c.lead_id);
+  const customer = (data.customers || []).find(cu => cu.id === c.customer_id);
+  const party = lead?.company_name || lead?.contact_name || customer?.company_name || c.company_name || c.contact_name || c.caller_phone || 'Ukjent nummer';
+
+  heading(party, 16);
+  muted([
+    fmtTime(c.created_at),
+    c.direction === 'inbound' ? 'Innkommende' : 'Utgående',
+    fmtDur(c.duration_seconds),
+    c.outcome ? 'Status: ' + c.outcome : null,
+    c.caller_phone || null,
+  ].filter(Boolean).join(' · '), 9);
+  y += 6;
+  hr();
+
+  // ── Sammendrag ──
+  if (c.summary) {
+    heading('Sammendrag', 12);
+    para(c.summary, 10);
+    y += 4;
+    hr();
+  }
+
+  // ── AI-analyse ──
+  if (analysis) {
+    heading('AI-analyse', 12);
+
+    const score = analysis.overall_score ?? 0;
+    const scoreColor = score >= 8 ? [16, 185, 129] : score >= 5 ? [245, 158, 11] : [239, 68, 68];
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(28);
+    doc.setTextColor(...scoreColor);
+    doc.text(String(score), margin, y + 14);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(120, 120, 130);
+    doc.text('/ 10 score', margin + 38, y + 14);
+    y += 28;
+
+    if (analysis.customer_intent) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(33, 33, 36);
+      doc.text('Kundens intensjon:', margin, y);
+      y += 12;
+      para(analysis.customer_intent, 10);
+    }
+    if (analysis.outcome_assessment) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(33, 33, 36);
+      doc.text('Resultat:', margin, y);
+      y += 12;
+      para(analysis.outcome_assessment, 10);
+    }
+
+    y += 4;
+    heading('✓ Hva funket', 11, [16, 130, 90]);
+    bullets(analysis.what_worked || [], [60, 60, 70], [16, 185, 129]);
+    y += 4;
+    heading('✗ Hva feilet', 11, [180, 50, 50]);
+    bullets(analysis.what_failed || [], [60, 60, 70], [239, 68, 68]);
+    y += 4;
+    heading('→ Forbedringspunkter', 11, [120, 80, 200]);
+    bullets(analysis.suggested_fixes || [], [60, 60, 70], [139, 92, 246]);
+
+    if (analysis.detected_problems?.length) {
+      y += 4;
+      heading('Detekterte problemer', 11);
+      for (const p of analysis.detected_problems) {
+        para('  • [' + (p.category || 'other') + '] ' + (p.description || ''), 10);
+      }
+    }
+    hr();
+  }
+
+  // ── Transkript ──
+  heading('Transkript', 12);
+  const transcript = c.transcript;
+  if (Array.isArray(transcript) && transcript.length) {
+    for (const t of transcript) {
+      const isAI = /agent|ai|assistant/i.test(t?.role || '');
+      const label = isAI ? 'AI' : 'Kunde';
+      const labelColor = isAI ? [139, 92, 246] : [14, 165, 233];
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(...labelColor);
+      checkPage(14);
+      doc.text(label + ':', margin, y);
+      y += 12;
+      para(t?.content || '', 10);
+      y += 2;
+    }
+  } else if (typeof transcript === 'string' && transcript.trim()) {
+    para(transcript, 10);
+  } else {
+    muted('Ingen transkript tilgjengelig', 9);
+  }
+
+  // ── Footer på alle sider ──
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 160);
+    doc.text(`Arxon · arxon.no · Samtale ${c.id.slice(0, 8)} · Side ${i}/${totalPages}`, margin, pageH - 16);
+  }
+
+  const filename = `arxon-samtale-${(party || 'rapport').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${c.created_at?.slice(0, 10) || ''}.pdf`;
+  doc.save(filename);
+}
+
+// ═════════════════════════════════════════════════════════════════
+// AGGREGERT TREND-ANALYSE
+// ═════════════════════════════════════════════════════════════════
+
+window.__lastTrendAnalysis = null;
+
+function openTrendAnalysis() {
+  const m = document.getElementById('trendAnalysisModal');
+  m.classList.remove('hidden');
+  m.classList.add('flex');
+}
+function closeTrendAnalysis() {
+  const m = document.getElementById('trendAnalysisModal');
+  m.classList.add('hidden');
+  m.classList.remove('flex');
+}
+
+async function runTrendAnalysis() {
+  const btn = document.getElementById('runTrendBtn');
+  const content = document.getElementById('trendAnalysisContent');
+  const days = parseInt(document.getElementById('trendDays')?.value || '7', 10);
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span><span>Analyserer...</span>';
+  content.innerHTML = '<div class="flex items-center gap-2 py-8 text-sm text-muted"><div class="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin"></div>AI leser opptil 30 samtaler og finner mønstre... (15-40 sek)</div>';
+
+  try {
+    const session = window.__authSession;
+    if (!session?.access_token) throw new Error('Ikke logget inn');
+
+    const res = await fetch('/api/analyze-calls-aggregate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ days, maxCalls: 30 }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+
+    if (!data.analysis) {
+      content.innerHTML = `<div class="text-center py-8 text-sm text-muted">${esc(data.message || 'Ingen samtaler i perioden')}</div>`;
+      return;
+    }
+
+    window.__lastTrendAnalysis = data.analysis;
+    renderTrendAnalysis(data.analysis, data.calls_analyzed);
+    document.getElementById('trendPdfBtn').classList.remove('hidden');
+  } catch (e) {
+    console.error('[trend]', e);
+    content.innerHTML = `<div class="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-300">
+      <div class="font-semibold mb-1">Kunne ikke kjøre analyse</div>
+      <div>${esc(e.message)}</div>
+    </div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span>🤖</span><span>Kjør analyse</span>';
+  }
+}
+
+function renderTrendAnalysis(a, callsAnalyzed) {
+  const content = document.getElementById('trendAnalysisContent');
+  const meta = document.getElementById('trendAnalysisMeta');
+  meta.textContent = `${callsAnalyzed || a.call_count || '?'} samtaler analysert · ${a.scope_label || ''}`;
+
+  const renderRecommendations = (arr) => {
+    if (!Array.isArray(arr) || !arr.length) return '<div class="text-[11px] text-zinc-600 italic">Ingen anbefalinger</div>';
+    return arr.map(r => {
+      const prio = r.priority || 3;
+      const prioColor = prio === 1 ? 'red' : prio === 2 ? 'amber' : 'zinc';
+      const prioLabel = prio === 1 ? 'Høy' : prio === 2 ? 'Middels' : 'Lav';
+      return `<div class="rounded-lg bg-zinc-900/60 border border-border p-3 mb-2">
+        <div class="flex items-start gap-3">
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-${prioColor}-500/15 text-${prioColor}-300 border border-${prioColor}-500/30 shrink-0 mt-0.5">${prioLabel}</span>
+          <div class="flex-1 min-w-0">
+            <div class="text-xs text-zinc-100 font-medium mb-1">${esc(r.action || '')}</div>
+            ${r.expected_impact ? `<div class="text-[11px] text-zinc-400">→ ${esc(r.expected_impact)}</div>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  };
+
+  const renderPatterns = (arr) => {
+    if (!Array.isArray(arr) || !arr.length) return '<div class="text-[11px] text-zinc-600 italic">Ingen mønstre detektert</div>';
+    return arr.map(p => {
+      const freq = p.frequency || 'middels';
+      const freqColor = freq === 'høy' ? 'red' : freq === 'middels' ? 'amber' : 'zinc';
+      const cat = p.category || 'other';
+      const catColor = { intent_recognition: 'red', language: 'amber', booking: 'sky', escalation: 'violet', tone: 'pink', other: 'zinc' }[cat] || 'zinc';
+      return `<div class="rounded-lg bg-zinc-900/60 border border-border p-3 mb-2">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-${catColor}-500/15 text-${catColor}-300 border border-${catColor}-500/30">${esc(cat)}</span>
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-${freqColor}-500/15 text-${freqColor}-300">${freq} frekvens</span>
+        </div>
+        <div class="text-xs text-zinc-200 mb-1">${esc(p.description || '')}</div>
+        ${p.example ? `<div class="text-[10px] text-zinc-500 italic">Eksempel: "${esc(p.example)}"</div>` : ''}
+      </div>`;
+    }).join('');
+  };
+
+  const renderQuestions = (arr) => {
+    if (!Array.isArray(arr) || !arr.length) return '<div class="text-[11px] text-zinc-600 italic">Ingen gjentatte feil-spørsmål</div>';
+    return arr.map(q => `<div class="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3 mb-2">
+      <div class="flex items-start justify-between gap-2 mb-1">
+        <div class="text-xs text-zinc-100 font-medium">"${esc(q.question || '')}"</div>
+        ${q.occurrences ? `<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 shrink-0">${q.occurrences}× </span>` : ''}
+      </div>
+      ${q.fix ? `<div class="text-[11px] text-zinc-400">→ ${esc(q.fix)}</div>` : ''}
+    </div>`).join('');
+  };
+
+  const renderWorkedConsistently = (arr) => {
+    if (!Array.isArray(arr) || !arr.length) return '<div class="text-[11px] text-zinc-600 italic">Ingen punkter</div>';
+    return '<ul class="space-y-1.5">' + arr.map(b => `<li class="text-xs text-zinc-300 flex items-start gap-2"><span class="text-emerald-400 mt-0.5">•</span><span>${esc(b)}</span></li>`).join('') + '</ul>';
+  };
+
+  // raw_response inneholder hele LLM-output, så vi henter ut what_worked_consistently + metric_summary
+  let raw = a.raw_response;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch {} }
+  const llmContent = raw?.choices?.[0]?.message?.content;
+  let llmParsed = {};
+  if (llmContent) { try { llmParsed = JSON.parse(llmContent); } catch {} }
+
+  const overallHealth = a.customer_intent || llmParsed.overall_health || '';
+  const metricSummary = llmParsed.metric_summary || {};
+  const workedConsistently = llmParsed.what_worked_consistently || [];
+
+  content.innerHTML = `
+    ${overallHealth ? `<div class="rounded-lg bg-violet-500/10 border border-violet-500/30 p-4 mb-4">
+      <div class="text-[10px] font-semibold text-violet-300 uppercase tracking-wider mb-1">Helhetsvurdering</div>
+      <div class="text-sm text-zinc-100">${esc(overallHealth)}</div>
+    </div>` : ''}
+
+    ${metricSummary.calls_analyzed ? `<div class="grid grid-cols-3 gap-2 mb-4">
+      <div class="rounded-lg bg-zinc-900/60 border border-border p-3 text-center">
+        <div class="text-2xl font-bold text-zinc-100">${metricSummary.calls_analyzed}</div>
+        <div class="text-[10px] text-muted uppercase tracking-wider">Analysert</div>
+      </div>
+      <div class="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-3 text-center">
+        <div class="text-2xl font-bold text-emerald-400">${metricSummary.successful_calls || 0}</div>
+        <div class="text-[10px] text-emerald-300 uppercase tracking-wider">Vellykket</div>
+      </div>
+      <div class="rounded-lg bg-red-500/5 border border-red-500/20 p-3 text-center">
+        <div class="text-2xl font-bold text-red-400">${metricSummary.failed_calls || 0}</div>
+        <div class="text-[10px] text-red-300 uppercase tracking-wider">Feilet</div>
+      </div>
+    </div>` : ''}
+
+    <div class="mb-4">
+      <h3 class="text-[10px] font-semibold text-violet-300 uppercase tracking-wider mb-2">Topp-prioriterte anbefalinger</h3>
+      ${renderRecommendations(a.recommendations)}
+    </div>
+
+    <div class="mb-4">
+      <h3 class="text-[10px] font-semibold text-amber-300 uppercase tracking-wider mb-2">Gjentatte spørsmål AI-en feilet på</h3>
+      ${renderQuestions(a.top_questions_failed)}
+    </div>
+
+    <div class="mb-4">
+      <h3 class="text-[10px] font-semibold text-zinc-300 uppercase tracking-wider mb-2">Identifiserte mønstre</h3>
+      ${renderPatterns(a.patterns)}
+    </div>
+
+    ${workedConsistently.length ? `<div class="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-3">
+      <div class="text-[10px] font-semibold text-emerald-300 uppercase tracking-wider mb-2">Hva funket konsistent</div>
+      ${renderWorkedConsistently(workedConsistently)}
+    </div>` : ''}
+  `;
+}
+
+function exportTrendAnalysisPdf() {
+  const a = window.__lastTrendAnalysis;
+  if (!a) return alert('Ingen analyse å eksportere');
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  let y = margin;
+
+  const checkPage = (n) => { if (y + n > pageH - margin) { doc.addPage(); y = margin; } };
+
+  // Header
+  doc.setFillColor(8, 8, 12); doc.rect(0, 0, pageW, 60, 'F');
+  doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
+  doc.text('ARXON', margin, 36);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(180, 180, 190);
+  doc.text('Trend-rapport · ' + new Date().toLocaleDateString('no-NO') + ' · ' + (a.scope_label || ''), margin, 50);
+  y = 80;
+
+  let raw = a.raw_response;
+  if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch {} }
+  const llmContent = raw?.choices?.[0]?.message?.content;
+  let llm = {};
+  if (llmContent) { try { llm = JSON.parse(llmContent); } catch {} }
+
+  const para = (text, size = 10, color = [60, 60, 70]) => {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(size); doc.setTextColor(...color);
+    const lines = doc.splitTextToSize(String(text || ''), pageW - 2 * margin);
+    for (const line of lines) { checkPage(size + 2); doc.text(line, margin, y); y += size + 2; }
+  };
+  const heading = (text, size = 13) => {
+    y += 4; checkPage(size + 4);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(size); doc.setTextColor(33, 33, 36);
+    doc.text(text, margin, y); y += size + 4;
+  };
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(33, 33, 36);
+  doc.text('AI-trend-analyse', margin, y); y += 22;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 130);
+  doc.text(`${a.call_count || '?'} samtaler analysert · ${a.scope_label || ''}`, margin, y); y += 18;
+
+  if (a.customer_intent || llm.overall_health) {
+    heading('Helhetsvurdering');
+    para(a.customer_intent || llm.overall_health, 11);
+  }
+
+  if (Array.isArray(a.recommendations) && a.recommendations.length) {
+    heading('Topp-prioriterte anbefalinger');
+    for (const r of a.recommendations) {
+      const prio = r.priority || 3;
+      const prioLabel = prio === 1 ? '[Høy]' : prio === 2 ? '[Middels]' : '[Lav]';
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(120, 80, 200);
+      checkPage(14); doc.text(prioLabel + ' ' + (r.action || ''), margin, y); y += 14;
+      if (r.expected_impact) para('  → ' + r.expected_impact, 10);
+      y += 4;
+    }
+  }
+
+  if (Array.isArray(a.top_questions_failed) && a.top_questions_failed.length) {
+    heading('Gjentatte spørsmål AI-en feilet på');
+    for (const q of a.top_questions_failed) {
+      doc.setFont('helvetica', 'italic'); doc.setFontSize(10); doc.setTextColor(170, 100, 30);
+      checkPage(14); doc.text('"' + (q.question || '') + '"' + (q.occurrences ? ' (' + q.occurrences + 'x)' : ''), margin, y); y += 14;
+      if (q.fix) para('  → ' + q.fix, 10);
+      y += 4;
+    }
+  }
+
+  if (Array.isArray(a.patterns) && a.patterns.length) {
+    heading('Identifiserte mønstre');
+    for (const p of a.patterns) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(33, 33, 36);
+      checkPage(14); doc.text('[' + (p.category || 'other') + ' · ' + (p.frequency || 'middels') + ']', margin, y); y += 12;
+      para(p.description || '', 10);
+      if (p.example) para('  Eksempel: "' + p.example + '"', 9, [120, 120, 130]);
+      y += 4;
+    }
+  }
+
+  if (Array.isArray(llm.what_worked_consistently) && llm.what_worked_consistently.length) {
+    heading('Hva funket konsistent');
+    for (const b of llm.what_worked_consistently) {
+      checkPage(12);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(16, 130, 90);
+      doc.text('  • ' + b, margin + 4, y); y += 12;
+    }
+  }
+
+  // Footer
+  const tot = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= tot; i++) {
+    doc.setPage(i);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(150, 150, 160);
+    doc.text(`Arxon · arxon.no · Side ${i}/${tot}`, margin, pageH - 16);
+  }
+
+  const filename = `arxon-trend-rapport-${a.scope_label?.replace(/\s+/g, '-').toLowerCase() || 'samtaler'}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(filename);
 }
 
 // ===== LEAD EMAILS (E-post tab) =====

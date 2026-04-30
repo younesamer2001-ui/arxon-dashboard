@@ -1,10 +1,12 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "name": "arxon-command-center",
-  "builds": [
-    { "src": "arxon-command-center.html", "use": "@vercel/static" }
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/arxon-command-center.html" }
   ],
-  "routes": [
-    { "src": "/(.*)", "dest": "/arxon-command-center.html" }
-  ]
+  "functions": {
+    "api/*.js": {
+      "maxDuration": 30
+    }
+  }
 }

@@ -1,0 +1,9 @@
+{
+  "name": "arxon-command-center",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Arxon Command Center — dashboard with PDF export + AI call analysis",
+  "engines": {
+    "node": "20.x"
+  }
+}
